@@ -309,70 +309,66 @@ def criar_reserva():
         conn.close()
 
 # Cancelar Reserva (TRANSAÇÃO 2)
-@app.route('/api/v1/reservas/<int:id_reserva>/cancelar', methods=['POST']) # cancela uma reserva de hospedagem existente, alterando seu status para "CANCELADO" e liberando o quarto associado à reserva, se houver
+@app.route('/api/v1/reservas/<int:id_reserva>/cancelar', methods=['PATCH', 'PUT'])
 def cancelar_reserva(id_reserva):
     conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     try:
-        cursor.execute("SELECT idQuarto, status FROM Reserva_Hospedagem WHERE idReserva_Hospedagem = %s", (id_reserva,))
-        reserva = cursor.fetchone()
+        # Atualiza o status da reserva para CANCELADO
+        query = "UPDATE Reserva_Hospedagem SET status = 'CANCELADO' WHERE idReserva_Hospedagem = %s"
+        cursor.execute(query, (id_reserva,))
+        conn.commit()
 
-        if not reserva:
+        if cursor.rowcount > 0:
+            return jsonify({"sucesso": True, "mensagem": "Reserva cancelada com sucesso!"}), 200
+        else:
             return jsonify({"sucesso": False, "mensagem": "Reserva não encontrada."}), 404
 
-        if reserva['status'] == 'CANCELADO':
-            return jsonify({"sucesso": False, "mensagem": "Reserva já está cancelada."}), 400
-
-        # Atualiza o status da reserva para CANCELADO
-        cursor.execute("UPDATE Reserva_Hospedagem SET status = 'CANCELADO' WHERE idReserva_Hospedagem = %s", (id_reserva,))
-
-        # Se houver um quarto associado, libera o quarto
-        if reserva['idQuarto']:
-            cursor.execute("UPDATE Quarto SET statusQuarto = 'DISPONIVEL' WHERE idQuarto = %s", (reserva['idQuarto'],))
-
-        conn.commit()
-        return jsonify({"sucesso": True, "mensagem": "Reserva cancelada com sucesso."})
     except Exception as e:
         conn.rollback()
-        return jsonify({"sucesso": False, "erro": str(e)}), 500
+        print(f"Erro ao cancelar reserva {id_reserva}: {e}")
+        return jsonify({"sucesso": False, "mensagem": str(e)}), 500
     finally:
         cursor.close()
         conn.close()
-
 
 
 # Consultar Reservas do Cliente (CONSULTA 2)
 @app.route('/api/v1/clientes/<int:id_cliente>/reservas', methods=['GET'])
-def reservas_cliente(id_cliente):
+def listar_reservas_cliente(id_cliente):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
+        # Note o JOIN: r.idTipoQuarto = t.idTipo_Quarto
         query = """
-            SELECT r.idReserva_Hospedagem, t.nome_tipoQuarto, q.num_quarto, 
-                   r.data_CheckIn, r.data_CheckOut, r.status, r.valor_Reserva, r.valor_Consumacao
+            SELECT 
+                r.idReserva_Hospedagem,
+                r.data_CheckIn,
+                r.data_CheckOut,
+                r.status,
+                t.nome_tipoQuarto
             FROM Reserva_Hospedagem r
-            JOIN Tipo_Quarto t ON r.idTipoQuarto = t.idTipoQuarto
-            LEFT JOIN Quarto q ON r.idQuarto = q.idQuarto
+            LEFT JOIN Tipo_Quarto t ON r.idTipoQuarto = t.idTipo_Quarto
             WHERE r.idCliente = %s
-            ORDER BY r.data_CheckIn DESC
         """
         cursor.execute(query, (id_cliente,))
-        rows = cursor.fetchall()
+        reservas = cursor.fetchall()
 
-        # Converter objetos de data do Python para string para ler no JSON
-        for row in rows:
-            if row.get('data_CheckIn'):
-                row['data_CheckIn'] = str(row['data_CheckIn'])
-            if row.get('data_CheckOut'):
-                row['data_CheckOut'] = str(row['data_CheckOut'])
+        # Converte objetos 'date' para string 'YYYY-MM-DD' para o jsonify
+        for res in reservas:
+            if res.get('data_CheckIn'):
+                res['data_CheckIn'] = str(res['data_CheckIn'])
+            if res.get('data_CheckOut'):
+                res['data_CheckOut'] = str(res['data_CheckOut'])
 
-        return jsonify({"sucesso": True, "dados": rows})
+        return jsonify({"sucesso": True, "dados": reservas}), 200
+
     except Exception as e:
-        return jsonify({"sucesso": False, "erro": str(e)}), 500
+        print(f"ERRO AO BUSCAR RESERVAS DO CLIENTE {id_cliente}: {e}")
+        return jsonify({"sucesso": False, "mensagem": str(e)}), 500
     finally:
         cursor.close()
         conn.close()
-
 
 # 4. RECEPÇÃO
 
