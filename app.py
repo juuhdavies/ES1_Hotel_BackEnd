@@ -327,34 +327,51 @@ def criar_reserva():
     try:
         dados = request.get_json() or {}
 
-        # 1. Extrai os campos do JSON vindo do JavaScript
         id_cliente = dados.get('idCliente')
         id_tipo_quarto = dados.get('idTipoQuarto')
         data_checkin = dados.get('data_checkin')
         data_checkout = dados.get('data_checkout')
         qnt_adultos = dados.get('qnt_adultos', 1)
         qnt_criancas = dados.get('qnt_criancas', 0)
-        
-        # Converte True/False para 1 ou 0 do MySQL TINYINT
         cafe_manha = 1 if dados.get('cafe_manha') else 0
 
-        # 2. Query de Inserção (Ajuste os nomes das colunas conforme sua tabela no banco)
+        # 1. Busca o preço base do tipo de quarto (ajuste o nome da coluna se necessário, ex: valor_base)
+        cursor.execute("SELECT valor_base FROM Tipo_Quarto WHERE idTipo_Quarto = %s", (id_tipo_quarto,))
+        tipo_quarto = cursor.fetchone()
+        
+        if not tipo_quarto:
+            return jsonify({"sucesso": False, "mensagem": "Tipo de quarto não encontrado."}), 404
+
+        valor_base = float(tipo_quarto.get('valor_base', 0))
+
+        # 2. Calcula a quantidade de dias entre o check-in e o check-out
+        d1 = datetime.strptime(data_checkin, '%Y-%m-%d')
+        d2 = datetime.strptime(data_checkout, '%Y-%m-%d')
+        dias = max(1, (d2 - d1).days)
+        
+        # 3. Calcula o valor total das diárias
+        valor_reserva = valor_base * dias
+
+        # 4. Insere a reserva salvando o valor calculado e o status inicial 'RESERVADO'
         query = """
-            INSERT INTO Reserva_hospedagem 
-                (idCliente, idTipoQuarto, data_checkin, data_checkout, qnt_adultos, qnt_criancas, cafe_manha, status)
+            INSERT INTO Reserva_Hospedagem 
+                (idCliente, idTipoQuarto, data_CheckIn, data_CheckOut, qnt_adultos, qnt_criancas, cafe_manha, valor_Reserva, status)
             VALUES 
-                (%s, %s, %s, %s, %s, %s, %s, 'RESERVADO')
+                (%s, %s, %s, %s, %s, %s, %s, %s, 'RESERVADO')
         """
-        valores = (id_cliente, id_tipo_quarto, data_checkin, data_checkout, qnt_adultos, qnt_criancas, cafe_manha)
+        valores = (id_cliente, id_tipo_quarto, data_checkin, data_checkout, qnt_adultos, qnt_criancas, cafe_manha, valor_reserva)
 
         cursor.execute(query, valores)
         conn.commit()
 
-        return jsonify({"sucesso": True, "mensagem": "Reserva realizada com sucesso!"}), 201
+        return jsonify({
+            "sucesso": True, 
+            "mensagem": "Reserva realizada com sucesso!", 
+            "valor_reserva": valor_reserva
+        }), 201
 
     except Exception as e:
         conn.rollback()
-        # Imprime a mensagem exata do erro do MySQL no terminal do VS Code/Flask
         print(f"ERRO AO CRIAR RESERVA: {e}") 
         return jsonify({"sucesso": False, "mensagem": str(e)}), 500
     finally:
@@ -537,7 +554,7 @@ def realizar_checkin():
         conn.close()
 
 
-# Realizar Check-out 
+
 # Realizar Check-out 
 @app.route('/api/v1/checkout', methods=['POST'])
 def realizar_checkout():
